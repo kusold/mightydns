@@ -1,5 +1,7 @@
 package mightydns
 
+import "log/slog"
+
 type ModuleInfo struct {
 	ID  string
 	New func() Module
@@ -19,6 +21,7 @@ type CleanerUpper interface {
 
 type Context interface {
 	App(name string) (interface{}, error)
+	Logger() *slog.Logger
 }
 
 var modules = make(map[string]ModuleInfo)
