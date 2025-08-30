@@ -4,15 +4,24 @@
 MightyDNS is a modular DNS server written in Go, inspired by Caddy's architecture. Currently in early development stage with minimal codebase.
 
 ## Build Commands
-- **Build**: `go build` (when Go files exist)
-- **Test**: `go test ./...` (when tests exist)
-- **Lint**: `golangci-lint run` (standard Go linting)
-- **Single test**: `go test -run TestName ./package`
+- **Build**: `go build ./cmd/mightydns` or `go build` for main package
+- **Test**: `go test ./...` (all packages) or `go test -run TestName ./package` (single test)
+- **Lint**: `golangci-lint run` (uses .golangci.yaml config with gofmt, goimports, gocritic, gosec)
+- **Format**: `gofmt -s -w .` and `goimports -w .` (auto-run by golangci-lint)
 
-## Testing Information
-- Find the CI plan in the .github/workflows folder
+## Code Style Guidelines
+- **Imports**: Use `goimports` with local prefix `github.com/kusold/mightydns`
+- **Formatting**: Use `gofmt -s` (simplify enabled)
+- **Naming**: Go conventions - CamelCase exports, camelCase private, ALL_CAPS constants
+- **Error handling**: Wrap errors with `fmt.Errorf("context: %w", err)` pattern
+- **Interfaces**: Small, focused interfaces (e.g., `App`, `Module`, `DNSHandler`)
+- **Structs**: JSON tags for config structs, private fields for internal state
+- **Logging**: Use `log/slog` with structured logging (`logger.Info("msg", "key", value)`)
+- **Comments**: Package-level comments required, exported items documented
+- **Context**: Pass `context.Context` as first parameter for I/O operations
 
-## Development Lifecycle Instructions
-- Never work in the `main` branch. You should always work in a branch.
-- Commit messages should follow the [Conventional Commit](https://www.conventionalcommits.org/en/v1.0.0/) standard. The body should be fairly verbose and describe what changes are being made, and more importantly why they are being made.
-- Always run the linting commands and run all the tests. You if either linting or testing fails, fix the problem before commiting.
+## Development Lifecycle
+- Never work in the `main` branch. Always create feature branches.
+- Run `golangci-lint run && go test ./...` before committing
+- Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/)
+- Fix all linting errors and test failures before committing
