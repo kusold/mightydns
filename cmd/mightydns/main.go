@@ -5,11 +5,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/kusold/mightydns"
-	_ "github.com/kusold/mightydns/module/dns"
-	_ "github.com/kusold/mightydns/module/dns/resolver"
-	_ "github.com/kusold/mightydns/module/log/handler"
 	"github.com/urfave/cli/v3"
+
+	"github.com/kusold/mightydns"
 )
 
 func main() {
@@ -48,7 +46,6 @@ func main() {
 func runServer(ctx context.Context, cmd *cli.Command) error {
 	configFile := cmd.String("config")
 
-	var err error
 	if configFile != "" {
 		// #nosec G304 - intentionally reading user-specified config file
 		configData, err := os.ReadFile(configFile)
@@ -57,14 +54,14 @@ func runServer(ctx context.Context, cmd *cli.Command) error {
 		}
 
 		// Load the provided config
-		err = mightydns.Load(configData, true)
+		if err := mightydns.Load(configData, true); err != nil {
+			return err
+		}
 	} else {
 		// Use default config (Run with nil creates default)
-		err = mightydns.Run(nil)
-	}
-
-	if err != nil {
-		return err
+		if err := mightydns.Run(nil); err != nil {
+			return err
+		}
 	}
 
 	// Keep the server running

@@ -11,6 +11,7 @@ import (
 	"github.com/miekg/dns"
 
 	"github.com/kusold/mightydns"
+	_ "github.com/kusold/mightydns/module/dns/resolver"
 )
 
 func init() {
