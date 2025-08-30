@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 
@@ -8,30 +9,51 @@ import (
 	_ "github.com/kusold/mightydns/module/dns"
 	_ "github.com/kusold/mightydns/module/dns/resolver"
 	_ "github.com/kusold/mightydns/module/log/handler"
+	"github.com/urfave/cli/v3"
 )
 
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "list-modules" {
-		modules := mightydns.GetModules()
-		fmt.Println("Registered modules:")
-		for id, info := range modules {
-			fmt.Printf("  %s\n", id)
-			_ = info
-		}
-		os.Exit(0)
+	app := &cli.Command{
+		Name:    "mightydns",
+		Usage:   "A modular DNS server",
+		Version: "dev",
+		Commands: []*cli.Command{
+			{
+				Name:  "run",
+				Usage: "Start the DNS server",
+				Flags: []cli.Flag{
+					&cli.StringFlag{
+						Name:    "config",
+						Aliases: []string{"c"},
+						Usage:   "Load configuration from `FILE`",
+					},
+				},
+				Action: runServer,
+			},
+			{
+				Name:   "list-modules",
+				Usage:  "List all registered modules",
+				Action: listModules,
+			},
+		},
+		DefaultCommand: "run",
 	}
 
-	var configData []byte
-	var err error
+	if err := app.Run(context.Background(), os.Args); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+}
 
-	// Check if a config file is provided
-	if len(os.Args) > 2 && os.Args[1] == "--config" {
-		configFile := os.Args[2]
+func runServer(ctx context.Context, cmd *cli.Command) error {
+	configFile := cmd.String("config")
+
+	var err error
+	if configFile != "" {
 		// #nosec G304 - intentionally reading user-specified config file
-		configData, err = os.ReadFile(configFile)
+		configData, err := os.ReadFile(configFile)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error reading config file %s: %v\n", configFile, err)
-			os.Exit(1)
+			return fmt.Errorf("reading config file %s: %w", configFile, err)
 		}
 
 		// Load the provided config
@@ -42,10 +64,18 @@ func main() {
 	}
 
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		return err
 	}
 
 	// Keep the server running
 	select {}
+}
+
+func listModules(ctx context.Context, cmd *cli.Command) error {
+	modules := mightydns.GetModules()
+	fmt.Println("Registered modules:")
+	for id := range modules {
+		fmt.Printf("  %s\n", id)
+	}
+	return nil
 }
