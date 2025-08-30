@@ -16,10 +16,10 @@ type LogHandler interface {
 
 func SetupLogging(config *LoggingConfig) error {
 	if config == nil {
-		// Default to console with INFO level
+		// Default to text with INFO level
 		config = &LoggingConfig{
 			Level:   "INFO",
-			Handler: "logger.console",
+			Handler: "logger.text",
 		}
 	}
 
@@ -27,7 +27,7 @@ func SetupLogging(config *LoggingConfig) error {
 
 	var handler slog.Handler
 	if config.Handler == "" {
-		config.Handler = "logger.console"
+		config.Handler = "logger.text"
 	}
 
 	moduleInfo, exists := GetModule(config.Handler)
@@ -119,4 +119,8 @@ func (c *basicContext) App(name string) (interface{}, error) {
 
 func (c *basicContext) Logger() *slog.Logger {
 	return slog.Default()
+}
+
+func (c *basicContext) LoadModule(cfg interface{}, fieldName string) (interface{}, error) {
+	return nil, fmt.Errorf("module loading not supported during logging setup")
 }

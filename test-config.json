@@ -1,0 +1,20 @@
+{
+  "logging": {
+    "level": "INFO",
+    "handler": "logger.text"
+  },
+  "apps": {
+    "dns": {
+      "servers": {
+        "main": {
+          "listen": [":9053"],
+          "protocol": ["udp", "tcp"],
+          "handler": {
+            "handler": "dns.resolver.upstream",
+            "upstreams": ["8.8.8.8:53", "1.1.1.1:53"]
+          }
+        }
+      }
+    }
+  }
+}
