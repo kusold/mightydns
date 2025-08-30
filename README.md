@@ -1,1 +1,1 @@
-# MaestroDNS
+# MightyDNS
