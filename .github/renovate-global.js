@@ -3,6 +3,7 @@ module.exports = {
   branchPrefix: "sherpa-renovate/",
   dependencyDashboardTitle: "Dependency Dashboard",
   gitAuthor: "Renovate Bot <bot@renovateapp.com>",
+  gitIgnoredAuthors: ["sherpa-guide[bot] <167393466+sherpa-guide[bot]@users.noreply.github.com>"],
   onboarding: true,
   onboardingBranch: "github-renovate/configure",
   platform: "github",
