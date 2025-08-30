@@ -53,3 +53,30 @@ jobs:
         with:
           version: latest
           args: --timeout=5m
+
+  renovate-config:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check if renovate.json was modified
+        id: check-renovate
+        run: |
+          if git diff --name-only origin/${{ github.base_ref }}...HEAD | grep -q ".github/renovate.json"; then
+            echo "renovate_modified=true" >> $GITHUB_OUTPUT
+          else
+            echo "renovate_modified=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Validate Renovate config
+        if: steps.check-renovate.outputs.renovate_modified == 'true'
+        uses: renovatebot/github-action@v40.1.12
+        with:
+          configurationFile: .github/renovate.json
+          token: ${{ secrets.GITHUB_TOKEN }}
+        env:
+          RENOVATE_CONFIG_VALIDATION: true
+          LOG_LEVEL: debug
