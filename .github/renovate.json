@@ -1,53 +1,102 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["config:best-practices", ":semanticCommits", ":automergeDigest"],
+  "extends": [
+    "config:best-practices",
+    ":semanticCommits",
+    ":automergeDigest"
+  ],
   "timezone": "America/Denver",
-  "labels": ["dependencies"],
+  "labels": [
+    "dependencies"
+  ],
   "packageRules": [
     {
-      "matchCategories": ["golang"],
+      "matchCategories": [
+        "golang"
+      ],
       "minimumReleaseAge": "3 days",
-      "labels": ["go-deps", "dependencies"],
-      "postUpdateOptions": ["gomodTidy"]
+      "labels": [
+        "go-deps",
+        "dependencies"
+      ],
+      "postUpdateOptions": [
+        "gomodTidy"
+      ]
     },
     {
       "description": "Pin Go version updates",
-      "matchManagers": ["gomod"],
-      "matchDepTypes": ["golang"],
+      "matchManagers": [
+        "gomod"
+      ],
+      "matchDepTypes": [
+        "golang"
+      ],
       "rangeStrategy": "pin",
-      "labels": ["go-version", "dependencies"],
-      "reviewers": ["kusold"]
+      "labels": [
+        "go-version",
+        "dependencies"
+      ],
+      "reviewers": [
+        "kusold"
+      ]
     },
     {
       "description": "GitHub Actions",
-      "matchManagers": ["github-actions"],
+      "matchManagers": [
+        "github-actions"
+      ],
       "rangeStrategy": "pin",
       "automerge": true,
-      "labels": ["github-actions", "dependencies"]
+      "labels": [
+        "github-actions",
+        "dependencies"
+      ]
     },
     {
       "description": "Nix flake inputs",
-      "matchManagers": ["nix"],
-      "matchFileNames": ["flake.nix", "flake.lock"],
+      "matchManagers": [
+        "nix"
+      ],
+      "matchFileNames": [
+        "flake.nix",
+        "flake.lock"
+      ],
       "groupName": "nix flake inputs",
-      "schedule": ["before 6am on monday"],
+      "schedule": [
+        "before 6am on monday"
+      ],
       "automerge": true,
-      "labels": ["nix", "dependencies"]
+      "labels": [
+        "nix",
+        "dependencies"
+      ]
     },
     {
-      "matchUpdateTypes": ["patch", "minor"],
+      "matchUpdateTypes": [
+        "patch",
+        "minor"
+      ],
       "automerge": true
     },
     {
-      "matchUpdateTypes": ["major"],
-      "excludePackagePatterns": ["^actions/"],
-      "dependencyDashboardApproval": true
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "dependencyDashboardApproval": true,
+      "matchPackageNames": [
+        "!/^actions//"
+      ]
     }
   ],
   "vulnerabilityAlerts": {
     "enabled": true,
-    "labels": ["security", "dependencies"],
-    "reviewers": ["kusold"]
+    "labels": [
+      "security",
+      "dependencies"
+    ],
+    "reviewers": [
+      "kusold"
+    ]
   },
   "osvVulnerabilityAlerts": true
 }
