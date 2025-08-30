@@ -21,7 +21,6 @@
     {
       "description": "GitHub Actions",
       "matchManagers": ["github-actions"],
-      "matchUpdateTypes": ["major", "minor", "patch"],
       "rangeStrategy": "pin",
       "automerge": true,
       "labels": ["github-actions", "dependencies"]
@@ -41,6 +40,7 @@
     },
     {
       "matchUpdateTypes": ["major"],
+      "excludePackagePatterns": ["^actions/"],
       "dependencyDashboardApproval": true
     }
   ],

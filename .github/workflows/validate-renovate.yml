@@ -1,0 +1,17 @@
+name: Validate Renovate Config
+
+on:
+  pull_request:
+    paths:
+      - ".github/renovate.json"
+      - ".github/renovate-global.js"
+
+jobs:
+  renovate-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4
+
+      - name: Validate Renovate config
+        run: |
+          npx --yes --package renovate -- renovate-config-validator .github/renovate.json
