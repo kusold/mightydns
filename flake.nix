@@ -17,12 +17,16 @@
             go
             golangci-lint
             git
+            pre-commit
           ];
 
           shellHook = ''
             echo "MightyDNS development environment"
             echo "Go version: $(go version)"
             echo "golangci-lint version: $(golangci-lint version)"
+            echo "pre-commit version: $(pre-commit --version)"
+            echo ""
+            echo "To set up pre-commit hooks, run: pre-commit install --install-hooks"
           '';
         };
       });
