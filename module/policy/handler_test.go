@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"net"
 	"os"
 	"strings"
 	"testing"
@@ -327,16 +326,6 @@ func (m *mockContext) LoadModule(cfg interface{}, fieldName string) (interface{}
 	return nil, fmt.Errorf("invalid config")
 }
 
-type mockResponseWriter struct {
-	addr net.Addr
-}
-
-func (m *mockResponseWriter) LocalAddr() net.Addr       { return m.addr }
-func (m *mockResponseWriter) RemoteAddr() net.Addr      { return m.addr }
-func (m *mockResponseWriter) WriteMsg(*dns.Msg) error   { return nil }
-func (m *mockResponseWriter) Write([]byte) (int, error) { return 0, nil }
-func (m *mockResponseWriter) Close() error              { return nil }
-func (m *mockResponseWriter) TsigStatus() error         { return nil }
 func TestPolicyHandler_ValidateConfiguration(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
