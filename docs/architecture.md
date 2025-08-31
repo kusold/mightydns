@@ -59,9 +59,11 @@ Everything else is handled by modules.
 
 **Guest Modules** provide specific functionality:
 - DNS handlers (A, AAAA, MX, etc.)
+- Zone managers (forward zones, authoritative zones)
 - Middleware (rate limiting, caching, filtering)
 - Backends (file, database, API)
 - Resolvers (upstream, recursive, cache)
+- Policy engines (client classification, routing)
 
 #### Module Lifecycle
 
@@ -138,6 +140,13 @@ type DNSMiddleware interface {
     ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg, next DNSHandler) error
 }
 
+// Zone interfaces
+type Zone interface {
+    Name() string
+    Match(qname string) bool
+    Resolve(ctx context.Context, w dns.ResponseWriter, r *dns.Msg, clientGroup string) (bool, error)
+}
+
 // Zone data providers
 type ZoneProvider interface {
     LookupRecord(ctx context.Context, qname string, qtype uint16) ([]dns.RR, error)
@@ -155,6 +164,13 @@ type ZoneProvider interface {
 - Connect to any data store
 - Implement dynamic zone generation
 - Add real-time zone updates
+- Zone file imports and exports
+
+### DNS Zones
+- Forward zones with local records and upstream fallback
+- Split-horizon DNS with policy-based record overrides
+- Multiple zone types for different use cases
+- Integration with policy engine for client-specific views
 
 ### Processing Logic
 - Custom record types
