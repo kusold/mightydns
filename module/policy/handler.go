@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net"
+	"strings"
 
 	"github.com/miekg/dns"
 
@@ -53,16 +55,12 @@ func (p *PolicyHandler) Provision(ctx mightydns.Context) error {
 	p.logger = ctx.Logger().With("module", "policy")
 	p.policyTrees = make(map[string]mightydns.DNSHandler)
 
-	// Validate base handler is provided
-	if len(p.BaseHandler) == 0 {
-		return fmt.Errorf("base_handler is required")
+	// Enhanced configuration validation
+	if err := p.validateConfiguration(); err != nil {
+		return fmt.Errorf("configuration validation failed: %w", err)
 	}
 
 	// Set up client classifier
-	if len(p.ClientGroups) == 0 {
-		return fmt.Errorf("client_groups are required")
-	}
-
 	p.classifier = client.NewClientClassifier(p.ClientGroups, p.logger)
 	if err := p.classifier.Provision(); err != nil {
 		return fmt.Errorf("provisioning client classifier: %w", err)
@@ -84,6 +82,158 @@ func (p *PolicyHandler) Provision(ctx mightydns.Context) error {
 		"client_groups", len(p.ClientGroups),
 		"policies", len(p.Policies),
 		"policy_trees", len(p.policyTrees))
+
+	return nil
+}
+
+// validateConfiguration performs comprehensive validation of the policy configuration
+func (p *PolicyHandler) validateConfiguration() error {
+	// Validate base handler is provided
+	if len(p.BaseHandler) == 0 {
+		return fmt.Errorf("base_handler is required")
+	}
+
+	// Validate base handler is valid JSON
+	var baseConfig map[string]interface{}
+	if err := json.Unmarshal(p.BaseHandler, &baseConfig); err != nil {
+		return fmt.Errorf("base_handler must be valid JSON: %w", err)
+	}
+
+	// Validate base handler has required 'handler' field
+	if _, exists := baseConfig["handler"]; !exists {
+		return fmt.Errorf("base_handler must specify a 'handler' field")
+	}
+
+	// Validate client groups are provided and non-empty
+	if len(p.ClientGroups) == 0 {
+		return fmt.Errorf("client_groups are required")
+	}
+
+	// Validate each client group
+	for groupName, group := range p.ClientGroups {
+		if err := p.validateClientGroup(groupName, group); err != nil {
+			return fmt.Errorf("invalid client group '%s': %w", groupName, err)
+		}
+	}
+
+	// Validate policies
+	groupNames := make(map[string]bool)
+	for name := range p.ClientGroups {
+		groupNames[name] = true
+	}
+
+	for i, policy := range p.Policies {
+		if err := p.validatePolicy(policy, groupNames, i); err != nil {
+			return fmt.Errorf("invalid policy at index %d: %w", i, err)
+		}
+	}
+
+	// Validate that policies don't have conflicting priorities
+	if err := p.validatePolicyPriorities(); err != nil {
+		return fmt.Errorf("policy priority validation failed: %w", err)
+	}
+
+	return nil
+}
+
+// validateClientGroup validates a single client group configuration
+func (p *PolicyHandler) validateClientGroup(_ string, group *client.ClientGroup) error {
+	if group == nil {
+		return fmt.Errorf("client group cannot be nil")
+	}
+
+	if len(group.Sources) == 0 {
+		return fmt.Errorf("client group must have at least one source")
+	}
+
+	// Validate each source
+	for i, source := range group.Sources {
+		if err := p.validateSource(source); err != nil {
+			return fmt.Errorf("invalid source at index %d (%s): %w", i, source, err)
+		}
+	}
+
+	// Validate priority is non-negative
+	if group.Priority < 0 {
+		return fmt.Errorf("priority must be non-negative, got %d", group.Priority)
+	}
+
+	return nil
+}
+
+// validateSource validates a single IP source (IP address or CIDR block)
+func (p *PolicyHandler) validateSource(source string) error {
+	if source == "" {
+		return fmt.Errorf("source cannot be empty")
+	}
+
+	// Check if it's a CIDR block
+	if strings.Contains(source, "/") {
+		_, _, err := net.ParseCIDR(source)
+		if err != nil {
+			return fmt.Errorf("invalid CIDR block: %w", err)
+		}
+	} else {
+		// It's an individual IP address
+		ip := net.ParseIP(source)
+		if ip == nil {
+			return fmt.Errorf("invalid IP address")
+		}
+	}
+
+	return nil
+}
+
+// validatePolicy validates a single policy configuration
+func (p *PolicyHandler) validatePolicy(policy *PolicyOverride, validGroups map[string]bool, _ int) error {
+	if policy == nil {
+		return fmt.Errorf("policy cannot be nil")
+	}
+
+	if policy.Match == nil {
+		return fmt.Errorf("policy must have a match condition")
+	}
+
+	if policy.Match.ClientGroup == "" {
+		return fmt.Errorf("policy must specify a client_group to match")
+	}
+
+	// Validate that the referenced client group exists
+	if !validGroups[policy.Match.ClientGroup] {
+		return fmt.Errorf("references unknown client group: %s", policy.Match.ClientGroup)
+	}
+
+	// Validate overrides if present
+	for handlerType, override := range policy.Overrides {
+		if handlerType == "" {
+			return fmt.Errorf("override handler type cannot be empty")
+		}
+
+		if len(override) == 0 {
+			return fmt.Errorf("override configuration for handler '%s' cannot be empty", handlerType)
+		}
+
+		// Validate that override is valid JSON
+		var overrideConfig map[string]interface{}
+		if err := json.Unmarshal(override, &overrideConfig); err != nil {
+			return fmt.Errorf("override configuration for handler '%s' must be valid JSON: %w", handlerType, err)
+		}
+	}
+
+	return nil
+}
+
+// validatePolicyPriorities ensures no conflicting group assignments
+func (p *PolicyHandler) validatePolicyPriorities() error {
+	groupsSeen := make(map[string]int)
+
+	for i, policy := range p.Policies {
+		groupName := policy.Match.ClientGroup
+		if prevIndex, exists := groupsSeen[groupName]; exists {
+			return fmt.Errorf("client group '%s' is used by multiple policies (indices %d and %d)", groupName, prevIndex, i)
+		}
+		groupsSeen[groupName] = i
+	}
 
 	return nil
 }

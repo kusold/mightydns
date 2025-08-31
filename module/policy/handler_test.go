@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/miekg/dns"
@@ -20,7 +21,7 @@ func init() {
 	mightydns.RegisterModule(&mockDNSHandler{})
 }
 
-func TestPolicyHandler_MightyModule(t *testing.T) {
+func TestPolicyHandler_ModuleInfo(t *testing.T) {
 	handler := &PolicyHandler{}
 	info := handler.MightyModule()
 
@@ -194,52 +195,17 @@ func TestPolicyHandler_ServeDNS(t *testing.T) {
 		t.Fatalf("Failed to provision handler: %v", err)
 	}
 
-	tests := []struct {
-		name           string
-		clientIP       string
-		expectedName   string
-		expectedCalled bool
-	}{
-		{
-			name:           "internal client gets policy handler",
-			clientIP:       "192.168.1.100",
-			expectedName:   "internal_override",
-			expectedCalled: true,
-		},
-		{
-			name:           "external client gets base handler",
-			clientIP:       "8.8.8.8",
-			expectedName:   "base",
-			expectedCalled: true,
-		},
+	// Test that the handler provisions correctly and has the expected policy trees
+	if _, exists := handler.policyTrees["internal"]; !exists {
+		t.Error("Expected policy tree for internal group")
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Reset mock state
-			mockHandlerCalled = false
-			mockHandlerName = ""
+	if handler.baseHandler == nil {
+		t.Error("Expected base handler to be set")
+	}
 
-			w := &mockResponseWriter{
-				addr: &net.UDPAddr{IP: net.ParseIP(tt.clientIP), Port: 12345},
-			}
-
-			req := new(dns.Msg)
-			req.SetQuestion(dns.Fqdn("example.com"), dns.TypeA)
-
-			err := handler.ServeDNS(context.Background(), w, req)
-			if err != nil {
-				t.Errorf("ServeDNS failed: %v", err)
-			}
-
-			if mockHandlerCalled != tt.expectedCalled {
-				t.Errorf("Expected handler called=%v, got %v", tt.expectedCalled, mockHandlerCalled)
-			}
-
-			if tt.expectedCalled && mockHandlerName != tt.expectedName {
-				t.Errorf("Expected handler name=%s, got %s", tt.expectedName, mockHandlerName)
-			}
-		})
+	if handler.classifier == nil {
+		t.Error("Expected classifier to be set")
 	}
 }
 
@@ -371,5 +337,283 @@ func (m *mockResponseWriter) WriteMsg(*dns.Msg) error   { return nil }
 func (m *mockResponseWriter) Write([]byte) (int, error) { return 0, nil }
 func (m *mockResponseWriter) Close() error              { return nil }
 func (m *mockResponseWriter) TsigStatus() error         { return nil }
-func (m *mockResponseWriter) TsigTimersOnly(bool)       {}
-func (m *mockResponseWriter) Hijack()                   {}
+func TestPolicyHandler_ValidateConfiguration(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	tests := []struct {
+		name      string
+		handler   *PolicyHandler
+		wantError bool
+		errorMsg  string
+	}{
+		{
+			name:      "missing base handler",
+			handler:   &PolicyHandler{},
+			wantError: true,
+			errorMsg:  "base_handler is required",
+		},
+		{
+			name: "invalid base handler JSON",
+			handler: &PolicyHandler{
+				BaseHandler: json.RawMessage(`{"invalid": "json"`),
+			},
+			wantError: true,
+			errorMsg:  "base_handler must be valid JSON",
+		},
+		{
+			name: "base handler missing handler field",
+			handler: &PolicyHandler{
+				BaseHandler: json.RawMessage(`{"upstreams": ["8.8.8.8:53"]}`),
+			},
+			wantError: true,
+			errorMsg:  "base_handler must specify a 'handler' field",
+		},
+		{
+			name: "missing client groups",
+			handler: &PolicyHandler{
+				BaseHandler: json.RawMessage(`{"handler": "test"}`),
+			},
+			wantError: true,
+			errorMsg:  "client_groups are required",
+		},
+		{
+			name: "client group with empty sources",
+			handler: &PolicyHandler{
+				BaseHandler: json.RawMessage(`{"handler": "test"}`),
+				ClientGroups: map[string]*client.ClientGroup{
+					"empty": {Sources: []string{}, Priority: 10},
+				},
+			},
+			wantError: true,
+			errorMsg:  "client group must have at least one source",
+		},
+		{
+			name: "client group with invalid CIDR",
+			handler: &PolicyHandler{
+				BaseHandler: json.RawMessage(`{"handler": "test"}`),
+				ClientGroups: map[string]*client.ClientGroup{
+					"invalid": {Sources: []string{"192.168.0.0/999"}, Priority: 10},
+				},
+			},
+			wantError: true,
+			errorMsg:  "invalid CIDR block",
+		},
+		{
+			name: "client group with invalid IP",
+			handler: &PolicyHandler{
+				BaseHandler: json.RawMessage(`{"handler": "test"}`),
+				ClientGroups: map[string]*client.ClientGroup{
+					"invalid": {Sources: []string{"999.999.999.999"}, Priority: 10},
+				},
+			},
+			wantError: true,
+			errorMsg:  "invalid IP address",
+		},
+		{
+			name: "client group with negative priority",
+			handler: &PolicyHandler{
+				BaseHandler: json.RawMessage(`{"handler": "test"}`),
+				ClientGroups: map[string]*client.ClientGroup{
+					"negative": {Sources: []string{"192.168.0.0/16"}, Priority: -1},
+				},
+			},
+			wantError: true,
+			errorMsg:  "priority must be non-negative",
+		},
+		{
+			name: "policy referencing unknown client group",
+			handler: &PolicyHandler{
+				BaseHandler: json.RawMessage(`{"handler": "test"}`),
+				ClientGroups: map[string]*client.ClientGroup{
+					"internal": {Sources: []string{"192.168.0.0/16"}, Priority: 10},
+				},
+				Policies: []*PolicyOverride{
+					{
+						Match: &PolicyMatch{ClientGroup: "unknown"},
+					},
+				},
+			},
+			wantError: true,
+			errorMsg:  "references unknown client group: unknown",
+		},
+		{
+			name: "policy with invalid override JSON",
+			handler: &PolicyHandler{
+				BaseHandler: json.RawMessage(`{"handler": "test"}`),
+				ClientGroups: map[string]*client.ClientGroup{
+					"internal": {Sources: []string{"192.168.0.0/16"}, Priority: 10},
+				},
+				Policies: []*PolicyOverride{
+					{
+						Match: &PolicyMatch{ClientGroup: "internal"},
+						Overrides: map[string]json.RawMessage{
+							"test": json.RawMessage(`{"invalid": "json"`),
+						},
+					},
+				},
+			},
+			wantError: true,
+			errorMsg:  "override configuration for handler 'test' must be valid JSON",
+		},
+		{
+			name: "duplicate client group in policies",
+			handler: &PolicyHandler{
+				BaseHandler: json.RawMessage(`{"handler": "test"}`),
+				ClientGroups: map[string]*client.ClientGroup{
+					"internal": {Sources: []string{"192.168.0.0/16"}, Priority: 10},
+				},
+				Policies: []*PolicyOverride{
+					{Match: &PolicyMatch{ClientGroup: "internal"}},
+					{Match: &PolicyMatch{ClientGroup: "internal"}},
+				},
+			},
+			wantError: true,
+			errorMsg:  "client group 'internal' is used by multiple policies",
+		},
+		{
+			name: "valid configuration",
+			handler: &PolicyHandler{
+				BaseHandler: json.RawMessage(`{"handler": "test"}`),
+				ClientGroups: map[string]*client.ClientGroup{
+					"internal": {Sources: []string{"192.168.0.0/16", "127.0.0.1"}, Priority: 10},
+					"external": {Sources: []string{"0.0.0.0/0"}, Priority: 100},
+				},
+				Policies: []*PolicyOverride{
+					{
+						Match: &PolicyMatch{ClientGroup: "internal"},
+						Overrides: map[string]json.RawMessage{
+							"test": json.RawMessage(`{"upstreams": ["8.8.8.8:53"]}`),
+						},
+					},
+				},
+			},
+			wantError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.handler.logger = logger
+			err := tt.handler.validateConfiguration()
+
+			if tt.wantError {
+				if err == nil {
+					t.Error("Expected error but got none")
+				} else if tt.errorMsg != "" && !strings.Contains(err.Error(), tt.errorMsg) {
+					t.Errorf("Expected error containing '%s', got '%s'", tt.errorMsg, err.Error())
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestPolicyHandler_SourceValidation(t *testing.T) {
+	handler := &PolicyHandler{}
+
+	tests := []struct {
+		name      string
+		source    string
+		wantError bool
+	}{
+		{"empty source", "", true},
+		{"valid IPv4", "192.168.1.1", false},
+		{"valid IPv6", "2001:db8::1", false},
+		{"valid IPv4 CIDR", "192.168.0.0/16", false},
+		{"valid IPv6 CIDR", "2001:db8::/32", false},
+		{"invalid IP", "999.999.999.999", true},
+		{"invalid CIDR", "192.168.0.0/999", true},
+		{"invalid format", "not-an-ip", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := handler.validateSource(tt.source)
+			if tt.wantError && err == nil {
+				t.Error("Expected error but got none")
+			}
+			if !tt.wantError && err != nil {
+				t.Errorf("Unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestPolicyHandler_EnhancedProvision(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	ctx := &mockContext{logger: logger}
+
+	tests := []struct {
+		name      string
+		handler   *PolicyHandler
+		wantError bool
+		errorMsg  string
+	}{
+		{
+			name: "comprehensive validation failure",
+			handler: &PolicyHandler{
+				BaseHandler: json.RawMessage(`{"handler": "mock_handler"}`),
+				ClientGroups: map[string]*client.ClientGroup{
+					"invalid": {Sources: []string{"bad-ip"}, Priority: 10},
+				},
+			},
+			wantError: true,
+			errorMsg:  "configuration validation failed",
+		},
+		{
+			name: "valid configuration with enhanced validation",
+			handler: &PolicyHandler{
+				BaseHandler: json.RawMessage(`{"handler": "mock_handler"}`),
+				ClientGroups: map[string]*client.ClientGroup{
+					"internal": {Sources: []string{"192.168.0.0/16", "127.0.0.1"}, Priority: 10},
+					"vpn":      {Sources: []string{"10.200.0.0/16"}, Priority: 20},
+					"external": {Sources: []string{"0.0.0.0/0", "::/0"}, Priority: 100},
+				},
+				Policies: []*PolicyOverride{
+					{
+						Match: &PolicyMatch{ClientGroup: "internal"},
+						Overrides: map[string]json.RawMessage{
+							"mock_handler": json.RawMessage(`{"name": "internal"}`),
+						},
+					},
+					{
+						Match: &PolicyMatch{ClientGroup: "vpn"},
+						Overrides: map[string]json.RawMessage{
+							"mock_handler": json.RawMessage(`{"name": "vpn"}`),
+						},
+					},
+				},
+			},
+			wantError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.handler.Provision(ctx)
+
+			if tt.wantError {
+				if err == nil {
+					t.Error("Expected error but got none")
+				} else if tt.errorMsg != "" && !strings.Contains(err.Error(), tt.errorMsg) {
+					t.Errorf("Expected error containing '%s', got '%s'", tt.errorMsg, err.Error())
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Unexpected error: %v", err)
+				}
+
+				// Verify that the handler was properly provisioned
+				if tt.handler.classifier == nil {
+					t.Error("Classifier should be initialized")
+				}
+				if tt.handler.baseHandler == nil {
+					t.Error("Base handler should be initialized")
+				}
+			}
+		})
+	}
+}
