@@ -606,3 +606,235 @@ func TestPolicyHandler_EnhancedProvision(t *testing.T) {
 		})
 	}
 }
+
+func TestPolicyHandler_ZoneMerging(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	handler := &PolicyHandler{logger: logger}
+
+	tests := []struct {
+		name          string
+		baseZones     interface{}
+		overrideZones interface{}
+		expectedZones int
+		expectedZone1 string
+		expectedZone2 string
+	}{
+		{
+			name: "merge base and override zones",
+			baseZones: []interface{}{
+				map[string]interface{}{
+					"type": "forward",
+					"zone": "rockymtn.org.",
+					"records": map[string]interface{}{
+						"test.ext": map[string]interface{}{
+							"type":  "A",
+							"value": "192.168.1.20",
+							"ttl":   300,
+						},
+					},
+				},
+			},
+			overrideZones: []interface{}{
+				map[string]interface{}{
+					"type": "forward",
+					"zone": "internal.rockymtn.org.",
+					"records": map[string]interface{}{
+						"api": map[string]interface{}{
+							"type":  "A",
+							"value": "203.0.113.10",
+							"ttl":   300,
+						},
+					},
+				},
+			},
+			expectedZones: 2,
+			expectedZone1: "rockymtn.org.",
+			expectedZone2: "internal.rockymtn.org.",
+		},
+		{
+			name: "override zone replaces base zone with same name",
+			baseZones: []interface{}{
+				map[string]interface{}{
+					"type": "forward",
+					"zone": "example.com.",
+					"records": map[string]interface{}{
+						"old": map[string]interface{}{
+							"type":  "A",
+							"value": "1.1.1.1",
+						},
+					},
+				},
+			},
+			overrideZones: []interface{}{
+				map[string]interface{}{
+					"type": "forward",
+					"zone": "example.com.",
+					"records": map[string]interface{}{
+						"new": map[string]interface{}{
+							"type":  "A",
+							"value": "2.2.2.2",
+						},
+					},
+				},
+			},
+			expectedZones: 1,
+			expectedZone1: "example.com.",
+		},
+		{
+			name:          "base zones not a slice",
+			baseZones:     "not-a-slice",
+			overrideZones: []interface{}{},
+			expectedZones: 0,
+		},
+		{
+			name:          "override zones not a slice",
+			baseZones:     []interface{}{},
+			overrideZones: "not-a-slice",
+			expectedZones: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := handler.mergeZones(tt.baseZones, tt.overrideZones)
+
+			if resultSlice, ok := result.([]interface{}); ok {
+				if len(resultSlice) != tt.expectedZones {
+					t.Errorf("Expected %d zones, got %d", tt.expectedZones, len(resultSlice))
+				}
+
+				// Check specific zones if expected
+				if tt.expectedZone1 != "" || tt.expectedZone2 != "" {
+					foundZones := make(map[string]bool)
+					for _, zone := range resultSlice {
+						if zoneConfig, ok := zone.(map[string]interface{}); ok {
+							if zoneName, exists := zoneConfig["zone"].(string); exists {
+								foundZones[zoneName] = true
+							}
+						}
+					}
+
+					if tt.expectedZone1 != "" && !foundZones[tt.expectedZone1] {
+						t.Errorf("Expected zone '%s' not found", tt.expectedZone1)
+					}
+					if tt.expectedZone2 != "" && !foundZones[tt.expectedZone2] {
+						t.Errorf("Expected zone '%s' not found", tt.expectedZone2)
+					}
+				}
+			} else if tt.expectedZones > 0 {
+				t.Error("Expected result to be a slice")
+			}
+		})
+	}
+}
+
+func TestPolicyHandler_ZoneOverrideIntegration(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	handler := &PolicyHandler{logger: logger}
+
+	// Simulate the exact scenario from the user's config
+	baseConfig := json.RawMessage(`{
+		"handler": "dns.zone.manager",
+		"zones": [
+			{
+				"type": "forward",
+				"zone": "rockymtn.org.",
+				"records": {
+					"test.internal": {
+						"type": "A",
+						"value": "192.168.1.10",
+						"ttl": 300
+					},
+					"test.ext": {
+						"type": "A",
+						"value": "192.168.1.20",
+						"ttl": 300
+					}
+				}
+			}
+		],
+		"default_upstream": {
+			"upstreams": ["8.8.8.8:53", "1.1.1.1:53"],
+			"timeout": "5s",
+			"protocol": "udp"
+		}
+	}`)
+
+	overrides := map[string]json.RawMessage{
+		"dns.zone.manager": json.RawMessage(`{
+			"zones": [
+				{
+					"type": "forward",
+					"zone": "internal.rockymtn.org.",
+					"records": {
+						"api": {
+							"type": "A",
+							"value": "203.0.113.10",
+							"ttl": 300
+						},
+						"test": {
+							"type": "A",
+							"value": "192.168.1.11",
+							"ttl": 300
+						}
+					},
+					"upstream": {
+						"upstreams": ["9.9.9.9:53"],
+						"timeout": "2s"
+					}
+				}
+			]
+		}`),
+	}
+
+	result, err := handler.applyOverrides(baseConfig, overrides)
+	if err != nil {
+		t.Fatalf("applyOverrides failed: %v", err)
+	}
+
+	// Parse the result to verify both zones are present
+	var resultConfig map[string]interface{}
+	if err := json.Unmarshal(result, &resultConfig); err != nil {
+		t.Fatalf("Failed to parse result config: %v", err)
+	}
+
+	zones, ok := resultConfig["zones"].([]interface{})
+	if !ok {
+		t.Fatal("zones field should be an array")
+	}
+
+	if len(zones) != 2 {
+		t.Fatalf("Expected 2 zones (base + override), got %d", len(zones))
+	}
+
+	// Verify both zones are present
+	foundZones := make(map[string]bool)
+	for _, zone := range zones {
+		if zoneConfig, ok := zone.(map[string]interface{}); ok {
+			if zoneName, exists := zoneConfig["zone"].(string); exists {
+				foundZones[zoneName] = true
+			}
+		}
+	}
+
+	if !foundZones["rockymtn.org."] {
+		t.Error("Base zone 'rockymtn.org.' should be preserved")
+	}
+
+	if !foundZones["internal.rockymtn.org."] {
+		t.Error("Override zone 'internal.rockymtn.org.' should be added")
+	}
+
+	// Verify default_upstream is preserved from base config
+	if defaultUpstream, exists := resultConfig["default_upstream"]; !exists {
+		t.Error("default_upstream should be preserved from base config")
+	} else if upstream, ok := defaultUpstream.(map[string]interface{}); ok {
+		if upstreams, ok := upstream["upstreams"].([]interface{}); ok {
+			if len(upstreams) != 2 || upstreams[0] != "8.8.8.8:53" {
+				t.Error("default_upstream should preserve base configuration")
+			}
+		}
+	}
+}

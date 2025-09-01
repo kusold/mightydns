@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"sort"
 	"strings"
 	"time"
 
@@ -12,6 +13,9 @@ import (
 
 	"github.com/kusold/mightydns"
 )
+
+// ClientGroupKey is the context key for storing client group information
+type ClientGroupKey struct{}
 
 func init() {
 	mightydns.RegisterModule(&ZoneManager{})
@@ -91,7 +95,7 @@ func (zm *ZoneManager) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dn
 	qname := normalizeQName(question.Name)
 	qtype := dns.TypeToString[question.Qtype]
 
-	clientGroup := zm.extractClientGroup(ctx, w)
+	clientGroup := zm.extractClientGroup(ctx)
 
 	zm.logger.Debug("processing DNS query",
 		"query_id", r.Id,
@@ -99,12 +103,28 @@ func (zm *ZoneManager) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dn
 		"qtype", qtype,
 		"client_group", clientGroup)
 
-	for zoneName, baseZone := range zm.baseZones {
-		if baseZone.Match(qname) {
-			resolved, err := baseZone.Resolve(ctx, w, r, clientGroup)
+	// Create a sorted list of zones by specificity (longest zone name first)
+	type zoneEntry struct {
+		name string
+		zone Zone
+	}
+
+	var sortedZones []zoneEntry
+	for zoneName, zone := range zm.baseZones {
+		sortedZones = append(sortedZones, zoneEntry{name: zoneName, zone: zone})
+	}
+
+	// Sort by zone name length (longer = more specific)
+	sort.Slice(sortedZones, func(i, j int) bool {
+		return len(sortedZones[i].name) > len(sortedZones[j].name)
+	})
+
+	for _, entry := range sortedZones {
+		if entry.zone.Match(qname) {
+			resolved, err := entry.zone.Resolve(ctx, w, r, clientGroup)
 			if err != nil {
 				zm.logger.Error("zone resolution error",
-					"zone", zoneName,
+					"zone", entry.name,
 					"qname", qname,
 					"client_group", clientGroup,
 					"error", err)
@@ -113,7 +133,7 @@ func (zm *ZoneManager) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dn
 
 			if resolved {
 				zm.logger.Debug("query resolved by zone",
-					"zone", zoneName,
+					"zone", entry.name,
 					"qname", qname,
 					"client_group", clientGroup)
 				return nil
@@ -131,7 +151,10 @@ func (zm *ZoneManager) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dn
 	return zm.sendErrorResponse(w, r, dns.RcodeNameError)
 }
 
-func (zm *ZoneManager) extractClientGroup(ctx context.Context, w dns.ResponseWriter) string {
+func (zm *ZoneManager) extractClientGroup(ctx context.Context) string {
+	if clientGroup, ok := ctx.Value(ClientGroupKey{}).(string); ok && clientGroup != "" {
+		return clientGroup
+	}
 	return "default"
 }
 

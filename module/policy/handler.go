@@ -12,6 +12,7 @@ import (
 
 	"github.com/kusold/mightydns"
 	"github.com/kusold/mightydns/module/client"
+	"github.com/kusold/mightydns/module/dns/zone"
 )
 
 func init() {
@@ -355,7 +356,12 @@ func (p *PolicyHandler) applyOverridesToConfig(config map[string]interface{}, ov
 
 			// Merge override into the result
 			for key, value := range overrideConfig {
-				result[key] = value
+				// Special handling for zones array - merge instead of replace
+				if key == "zones" && handlerType == "dns.zone.manager" {
+					result[key] = p.mergeZones(result[key], value)
+				} else {
+					result[key] = value
+				}
 			}
 
 			p.logger.Debug("applied override",
@@ -396,6 +402,56 @@ func (p *PolicyHandler) deepCopyMap(original map[string]interface{}) map[string]
 		copy[k] = p.deepCopyValue(v)
 	}
 	return copy
+}
+
+// mergeZones merges base zones with override zones, keeping all base zones and adding override zones
+func (p *PolicyHandler) mergeZones(baseZones interface{}, overrideZones interface{}) interface{} {
+	// Convert both to slices
+	baseSlice, ok := baseZones.([]interface{})
+	if !ok {
+		p.logger.Warn("base zones is not a slice, using override zones only")
+		return overrideZones
+	}
+
+	overrideSlice, ok := overrideZones.([]interface{})
+	if !ok {
+		p.logger.Warn("override zones is not a slice, using base zones only")
+		return baseZones
+	}
+
+	// Create a map to track zones by their "zone" field to avoid duplicates
+	zoneMap := make(map[string]interface{})
+
+	// Add all base zones first
+	for _, zone := range baseSlice {
+		if zoneConfig, ok := zone.(map[string]interface{}); ok {
+			if zoneName, exists := zoneConfig["zone"].(string); exists {
+				zoneMap[zoneName] = zone
+			}
+		}
+	}
+
+	// Add override zones, which may replace base zones with same name
+	for _, zone := range overrideSlice {
+		if zoneConfig, ok := zone.(map[string]interface{}); ok {
+			if zoneName, exists := zoneConfig["zone"].(string); exists {
+				zoneMap[zoneName] = zone
+			}
+		}
+	}
+
+	// Convert back to slice
+	result := make([]interface{}, 0, len(zoneMap))
+	for _, zone := range zoneMap {
+		result = append(result, zone)
+	}
+
+	p.logger.Debug("merged zones",
+		"base_zones", len(baseSlice),
+		"override_zones", len(overrideSlice),
+		"merged_zones", len(result))
+
+	return result
 }
 
 func (p *PolicyHandler) deepCopyValue(original interface{}) interface{} {
@@ -465,8 +521,9 @@ func (p *PolicyHandler) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *d
 			"handler", handlerName)
 	}
 
-	// Route to the selected handler
-	return selectedHandler.ServeDNS(ctx, w, r)
+	// Route to the selected handler with client group in context
+	ctxWithClientGroup := context.WithValue(ctx, zone.ClientGroupKey{}, clientGroup)
+	return selectedHandler.ServeDNS(ctxWithClientGroup, w, r)
 }
 
 func (p *PolicyHandler) Cleanup() error {

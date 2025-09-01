@@ -43,6 +43,28 @@ func normalizeQName(qname string) string {
 	return qname
 }
 
+// makeAbsolute converts a relative name to FQDN within a zone
+// If name is already absolute (ends with .), returns it normalized
+// If name is relative, appends the zone name
+// Special case: "@" represents the zone apex
+func makeAbsolute(name, zoneName string) string {
+	name = strings.TrimSpace(name)
+	zoneName = normalizeQName(zoneName)
+
+	// Handle zone apex
+	if name == "@" || name == "" {
+		return zoneName
+	}
+
+	// If already absolute, just normalize
+	if strings.HasSuffix(name, ".") {
+		return normalizeQName(name)
+	}
+
+	// Make relative name absolute by appending zone
+	return normalizeQName(name + "." + zoneName)
+}
+
 func isSubdomain(qname, zone string) bool {
 	qname = normalizeQName(qname)
 	zone = normalizeQName(zone)

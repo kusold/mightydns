@@ -202,3 +202,43 @@ func TestForwardZoneMergeRecords(t *testing.T) {
 		t.Errorf("new record not added correctly: %s", mergedRecords["new.example.com."].Value)
 	}
 }
+
+func TestZoneManager_ExtractClientGroup(t *testing.T) {
+	zm := &ZoneManager{}
+
+	tests := []struct {
+		name     string
+		ctx      context.Context
+		expected string
+	}{
+		{
+			name:     "default context",
+			ctx:      context.Background(),
+			expected: "default",
+		},
+		{
+			name:     "context with client group",
+			ctx:      context.WithValue(context.Background(), ClientGroupKey{}, "internal"),
+			expected: "internal",
+		},
+		{
+			name:     "context with empty client group",
+			ctx:      context.WithValue(context.Background(), ClientGroupKey{}, ""),
+			expected: "default",
+		},
+		{
+			name:     "context with non-string client group",
+			ctx:      context.WithValue(context.Background(), ClientGroupKey{}, 123),
+			expected: "default",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := zm.extractClientGroup(tt.ctx)
+			if result != tt.expected {
+				t.Errorf("Expected %s, got %s", tt.expected, result)
+			}
+		})
+	}
+}

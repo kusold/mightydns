@@ -19,14 +19,16 @@ type ForwardZone struct {
 }
 
 func NewForwardZone(zoneName string, records map[string]DNSRecord, upstream *UpstreamConfig) *ForwardZone {
+	normalizedZoneName := normalizeQName(zoneName)
 	fz := &ForwardZone{
-		zoneName:       normalizeQName(zoneName),
+		zoneName:       normalizedZoneName,
 		records:        make(map[string]DNSRecord),
 		upstreamConfig: upstream,
 	}
 
 	for name, record := range records {
-		fz.records[normalizeQName(name)] = record
+		absoluteName := makeAbsolute(name, normalizedZoneName)
+		fz.records[absoluteName] = record
 	}
 
 	fz.setupUpstreamClient()
@@ -184,7 +186,8 @@ func (fz *ForwardZone) forwardToUpstream(ctx context.Context, w dns.ResponseWrit
 func (fz *ForwardZone) UpdateRecords(records map[string]DNSRecord) {
 	fz.records = make(map[string]DNSRecord)
 	for name, record := range records {
-		fz.records[normalizeQName(name)] = record
+		absoluteName := makeAbsolute(name, fz.zoneName)
+		fz.records[absoluteName] = record
 	}
 }
 
@@ -201,7 +204,8 @@ func (fz *ForwardZone) MergeRecords(overrideRecords map[string]DNSRecord) *Forwa
 	}
 
 	for name, record := range overrideRecords {
-		mergedRecords[normalizeQName(name)] = record
+		absoluteName := makeAbsolute(name, fz.zoneName)
+		mergedRecords[absoluteName] = record
 	}
 
 	newZone := NewForwardZone(fz.zoneName, mergedRecords, fz.upstreamConfig)
