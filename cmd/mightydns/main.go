@@ -8,6 +8,7 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"github.com/kusold/mightydns"
+	_ "github.com/kusold/mightydns/module/standard"
 )
 
 func main() {
