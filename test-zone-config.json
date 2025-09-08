@@ -1,0 +1,106 @@
+{
+  "logging": {
+    "level": "DEBUG",
+    "handler": "logger.text"
+  },
+  "apps": {
+    "dns": {
+      "servers": {
+        "main": {
+          "listen": [":15353"],
+          "protocol": ["udp", "tcp"],
+          "handler": {
+            "handler": "policy",
+            "base_handler": {
+              "handler": "dns.zone.manager",
+              "zones": [
+                {
+                  "type": "forward",
+                  "zone": "internal.example.com.",
+                  "records": {
+                    "api.internal.example.com.": {
+                      "type": "A",
+                      "value": "192.168.1.10",
+                      "ttl": 300
+                    },
+                    "web.internal.example.com.": {
+                      "type": "A", 
+                      "value": "192.168.1.20",
+                      "ttl": 300
+                    },
+                    "db.internal.example.com.": {
+                      "type": "A",
+                      "value": "192.168.1.30",
+                      "ttl": 300
+                    }
+                  },
+                  "upstream": {
+                    "upstreams": ["10.0.0.1:53"],
+                    "timeout": "3s"
+                  }
+                },
+                {
+                  "type": "forward",
+                  "zone": "app.example.com.",
+                  "records": {
+                    "service.app.example.com.": {
+                      "type": "A",
+                      "value": "192.168.2.10",
+                      "ttl": 600
+                    }
+                  }
+                }
+              ],
+              "default_upstream": {
+                "upstreams": ["8.8.8.8:53", "1.1.1.1:53"],
+                "timeout": "5s",
+                "protocol": "udp"
+              }
+            },
+            "client_groups": {
+              "internal": {
+                "sources": ["192.168.0.0/16", "10.0.0.0/8", "127.0.0.1"],
+                "priority": 10
+              },
+              "external": {
+                "sources": ["0.0.0.0/0"],
+                "priority": 100
+              }
+            },
+            "policies": [
+              {
+                "match": {"client_group": "external"},
+                "overrides": {
+                  "dns.zone.manager": {
+                    "zones": [
+                      {
+                        "type": "forward",
+                        "zone": "internal.example.com.",
+                        "records": {
+                          "api.internal.example.com.": {
+                            "type": "A",
+                            "value": "203.0.113.10",
+                            "ttl": 300
+                          },
+                          "web.internal.example.com.": {
+                            "type": "A",
+                            "value": "203.0.113.20", 
+                            "ttl": 300
+                          }
+                        },
+                        "upstream": {
+                          "upstreams": ["9.9.9.9:53"],
+                          "timeout": "2s"
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

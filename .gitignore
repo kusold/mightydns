@@ -1,4 +1,6 @@
 mightydns
 !mightydns/
+/config.json
 
 /.direnv/
+/.idea/
