@@ -1,0 +1,58 @@
+{
+  "logging": {
+    "level": "DEBUG",
+    "handler": "logger.text"
+  },
+  "apps": {
+    "dns": {
+      "servers": {
+        "main": {
+          "listen": [":15353"],
+          "protocol": ["udp", "tcp"],
+          "handler": {
+            "handler": "policy",
+            "base_handler": {
+              "handler": "dns.resolver.upstream",
+              "upstreams": ["1.1.1.1:53", "1.0.0.1:53"],
+              "timeout": "5s"
+            },
+            "client_groups": {
+              "internal": {
+                "sources": ["192.168.0.0/16", "10.0.0.0/8", "127.0.0.1"],
+                "priority": 10
+              },
+              "dmz": {
+                "sources": ["172.16.0.0/12"],
+                "priority": 20
+              },
+              "external": {
+                "sources": ["0.0.0.0/0"],
+                "priority": 100
+              }
+            },
+            "policies": [
+              {
+                "match": {"client_group": "internal"},
+                "overrides": {
+                  "dns.resolver.upstream": {
+                    "upstreams": ["8.8.8.8:53", "8.8.4.4:53"],
+                    "timeout": "2s"
+                  }
+                }
+              },
+              {
+                "match": {"client_group": "dmz"},
+                "overrides": {
+                  "dns.resolver.upstream": {
+                    "upstreams": ["9.9.9.9:53"],
+                    "timeout": "3s"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}
